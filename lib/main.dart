@@ -1,79 +1,83 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Focus;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-void main() {
-  runApp(const LunaLogApp());
-}
+import 'shared/i18n/app_strings.dart';
+import 'shared/models/app_settings.dart';
+import 'shared/models/daily_log.dart';
+import 'shared/models/log_enums.dart';
+import 'shared/models/signal_state.dart';
+import 'shared/services/signal_service.dart';
+import 'shared/state/app_providers.dart';
+import 'shared/storage/luna_storage.dart';
+import 'shared/utils/date_utils.dart';
 
-enum AppLanguage { zh, en }
-
-enum LunarThemeMode { dark, light }
-
-enum Mood { calm, bright, low, restless, tender }
-
-enum Energy { low, steady, high }
-
-enum Focus { scattered, gentle, sharp }
-
-enum Sleep { poor, okay, good }
-
-enum FrequencyTag { lofi, lunarRadio, deepSpace }
-
-class LunaEntry {
-  const LunaEntry({
-    required this.createdAt,
-    required this.mood,
-    required this.energy,
-    required this.focus,
-    required this.sleep,
-    required this.note,
-    required this.frequency,
-  });
-
-  final DateTime createdAt;
-  final Mood mood;
-  final Energy energy;
-  final Focus focus;
-  final Sleep sleep;
-  final String note;
-  final FrequencyTag frequency;
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final LunaStorage storage = await LunaStorage.open();
+  runApp(
+    LunaLogApp(
+      storage: storage,
+      initialEntries: storage.loadEntries(),
+      initialSettings: storage.loadSettings(),
+    ),
+  );
 }
 
 class LunaLogApp extends StatefulWidget {
-  const LunaLogApp({super.key});
+  const LunaLogApp({
+    super.key,
+    required this.storage,
+    required this.initialEntries,
+    required this.initialSettings,
+  });
+
+  final LunaStorage? storage;
+  final List<LunaEntry> initialEntries;
+  final AppSettings initialSettings;
 
   @override
   State<LunaLogApp> createState() => _LunaLogAppState();
 }
 
 class _LunaLogAppState extends State<LunaLogApp> {
-  AppLanguage _language = AppLanguage.zh;
-  LunarThemeMode _themeMode = LunarThemeMode.dark;
-  int _tabIndex = 0;
-  final List<LunaEntry> _entries = <LunaEntry>[
-    LunaEntry(
-      createdAt: DateTime.now().subtract(const Duration(days: 1)),
-      mood: Mood.calm,
-      energy: Energy.steady,
-      focus: Focus.gentle,
-      sleep: Sleep.good,
-      note: '想把今天记下来，像给月面基地留一条值班日志。',
-      frequency: FrequencyTag.lofi,
-    ),
-  ];
+  @override
+  Widget build(BuildContext context) {
+    return ProviderScope(
+      overrides: [
+        logsRepositoryProvider.overrideWithValue(widget.storage),
+        initialAppSettingsProvider.overrideWithValue(widget.initialSettings),
+        initialLogsProvider.overrideWithValue(widget.initialEntries),
+      ],
+      child: const _LunaLogShell(),
+    );
+  }
+}
 
-  void _saveEntry(LunaEntry entry) {
-    setState(() {
-      _entries.insert(0, entry);
-      _tabIndex = 0;
-    });
+class _LunaLogShell extends ConsumerStatefulWidget {
+  const _LunaLogShell();
+
+  @override
+  ConsumerState<_LunaLogShell> createState() => _LunaLogShellState();
+}
+
+class _LunaLogShellState extends ConsumerState<_LunaLogShell> {
+  int _tabIndex = 0;
+
+  void _switchToLog() {
+    setState(() => _tabIndex = 1);
+  }
+
+  void _returnHome() {
+    setState(() => _tabIndex = 0);
   }
 
   @override
   Widget build(BuildContext context) {
-    final ThemeData theme = _themeMode == LunarThemeMode.dark
+    final LunarThemeMode themeMode = ref.watch(themeModeProvider);
+    final ThemeData theme = themeMode == LunarThemeMode.dark
         ? _buildDarkTheme()
         : _buildLightTheme();
-    final AppStrings strings = AppStrings(_language);
+    final AppStrings strings = ref.watch(appStringsProvider);
 
     return MaterialApp(
       title: 'LunaLog',
@@ -83,30 +87,10 @@ class _LunaLogAppState extends State<LunaLogApp> {
         body: IndexedStack(
           index: _tabIndex,
           children: <Widget>[
-            HomePage(
-              strings: strings,
-              latestEntry: _entries.isEmpty ? null : _entries.first,
-              onLogNow: () => setState(() => _tabIndex = 1),
-            ),
-            LogPage(
-              strings: strings,
-              onSave: _saveEntry,
-            ),
-            ArchivePage(
-              strings: strings,
-              entries: _entries,
-            ),
-            SettingsPage(
-              strings: strings,
-              language: _language,
-              themeMode: _themeMode,
-              onLanguageChanged: (AppLanguage value) {
-                setState(() => _language = value);
-              },
-              onThemeChanged: (LunarThemeMode value) {
-                setState(() => _themeMode = value);
-              },
-            ),
+            HomePage(onLogNow: _switchToLog),
+            LogPage(onSaveComplete: _returnHome),
+            const ArchivePage(),
+            const SettingsPage(),
           ],
         ),
         bottomNavigationBar: NavigationBar(
@@ -142,25 +126,17 @@ class _LunaLogAppState extends State<LunaLogApp> {
   }
 }
 
-class HomePage extends StatelessWidget {
-  const HomePage({
-    super.key,
-    required this.strings,
-    required this.latestEntry,
-    required this.onLogNow,
-  });
+class HomePage extends ConsumerWidget {
+  const HomePage({super.key, required this.onLogNow});
 
-  final AppStrings strings;
-  final LunaEntry? latestEntry;
   final VoidCallback onLogNow;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final ThemeData theme = Theme.of(context);
-    final LunaEntry? entry = latestEntry;
-    final String signal = entry == null
-        ? strings.emptySignal
-        : buildSignal(strings, entry);
+    final AppStrings strings = ref.watch(appStringsProvider);
+    final LunaEntry? entry = ref.watch(latestLogProvider);
+    final SignalState signalState = ref.watch(signalStateProvider);
 
     return SafeArea(
       child: ListView(
@@ -175,7 +151,7 @@ class HomePage extends StatelessWidget {
           _Panel(
             title: strings.todaySignal,
             child: Text(
-              signal,
+              signalState.signalText,
               style: theme.textTheme.titleMedium?.copyWith(height: 1.5),
             ),
           ),
@@ -238,21 +214,16 @@ class HomePage extends StatelessWidget {
   }
 }
 
-class LogPage extends StatefulWidget {
-  const LogPage({
-    super.key,
-    required this.strings,
-    required this.onSave,
-  });
+class LogPage extends ConsumerStatefulWidget {
+  const LogPage({super.key, required this.onSaveComplete});
 
-  final AppStrings strings;
-  final ValueChanged<LunaEntry> onSave;
+  final VoidCallback onSaveComplete;
 
   @override
-  State<LogPage> createState() => _LogPageState();
+  ConsumerState<LogPage> createState() => _LogPageState();
 }
 
-class _LogPageState extends State<LogPage> {
+class _LogPageState extends ConsumerState<LogPage> {
   Mood _mood = Mood.calm;
   Energy _energy = Energy.steady;
   Focus _focus = Focus.gentle;
@@ -273,17 +244,36 @@ class _LogPageState extends State<LogPage> {
   }
 
   void _save() {
-    widget.onSave(
+    final DateTime now = DateTime.now();
+    final LunaEntry previewEntry = LunaEntry(
+      id: now.microsecondsSinceEpoch.toString(),
+      createdAt: now,
+      dateKey: dateKeyFor(now),
+      mood: _mood,
+      energy: _energy,
+      focus: _focus,
+      sleep: _sleep,
+      note: _noteController.text.trim(),
+      frequency: _frequency,
+      generatedSignalText: '',
+    );
+    final AppStrings strings = ref.read(appStringsProvider);
+    saveLog(
+      ref,
       LunaEntry(
-        createdAt: DateTime.now(),
+        id: previewEntry.id,
+        createdAt: now,
+        dateKey: previewEntry.dateKey,
         mood: _mood,
         energy: _energy,
         focus: _focus,
         sleep: _sleep,
         note: _noteController.text.trim(),
         frequency: _frequency,
+        generatedSignalText: buildSignal(strings, previewEntry),
       ),
     );
+    widget.onSaveComplete();
     _noteController.clear();
     setState(() {
       _mood = Mood.calm;
@@ -292,21 +282,27 @@ class _LogPageState extends State<LogPage> {
       _sleep = Sleep.okay;
       _frequency = FrequencyTag.lofi;
     });
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(widget.strings.saved)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(strings.saved)));
   }
 
   @override
   Widget build(BuildContext context) {
-    final AppStrings strings = widget.strings;
+    final AppStrings strings = ref.watch(appStringsProvider);
     return SafeArea(
       child: ListView(
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
         children: <Widget>[
-          Text(strings.logTitle, style: Theme.of(context).textTheme.headlineMedium),
+          Text(
+            strings.logTitle,
+            style: Theme.of(context).textTheme.headlineMedium,
+          ),
           const SizedBox(height: 6),
-          Text(strings.logSubtitle, style: Theme.of(context).textTheme.bodyMedium),
+          Text(
+            strings.logSubtitle,
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
           const SizedBox(height: 20),
           _SegmentBlock<Mood>(
             title: strings.mood,
@@ -344,8 +340,10 @@ class _LogPageState extends State<LogPage> {
             title: strings.frequency,
             value: _frequency,
             values: FrequencyTag.values,
-            labelBuilder: (FrequencyTag value) => frequencyLabel(strings, value),
-            onChanged: (FrequencyTag value) => setState(() => _frequency = value),
+            labelBuilder: (FrequencyTag value) =>
+                frequencyLabel(strings, value),
+            onChanged: (FrequencyTag value) =>
+                setState(() => _frequency = value),
           ),
           const SizedBox(height: 16),
           _Panel(
@@ -353,9 +351,7 @@ class _LogPageState extends State<LogPage> {
             child: TextField(
               controller: _noteController,
               maxLines: 5,
-              decoration: InputDecoration(
-                hintText: strings.noteHint,
-              ),
+              decoration: InputDecoration(hintText: strings.noteHint),
             ),
           ),
           const SizedBox(height: 16),
@@ -365,16 +361,21 @@ class _LogPageState extends State<LogPage> {
               buildSignal(
                 strings,
                 LunaEntry(
+                  id: 'preview',
                   createdAt: DateTime.now(),
+                  dateKey: dateKeyFor(DateTime.now()),
                   mood: _mood,
                   energy: _energy,
                   focus: _focus,
                   sleep: _sleep,
                   note: _noteController.text.trim(),
                   frequency: _frequency,
+                  generatedSignalText: '',
                 ),
               ),
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(height: 1.5),
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(height: 1.5),
             ),
           ),
           const SizedBox(height: 16),
@@ -392,23 +393,21 @@ class _LogPageState extends State<LogPage> {
   }
 }
 
-class ArchivePage extends StatelessWidget {
-  const ArchivePage({
-    super.key,
-    required this.strings,
-    required this.entries,
-  });
-
-  final AppStrings strings;
-  final List<LunaEntry> entries;
+class ArchivePage extends ConsumerWidget {
+  const ArchivePage({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final AppStrings strings = ref.watch(appStringsProvider);
+    final List<LunaEntry> entries = ref.watch(archiveLogsProvider);
     final DateTime now = DateTime.now();
     final int daysInMonth = DateTime(now.year, now.month + 1, 0).day;
     final Set<int> loggedDays = entries
-        .where((LunaEntry entry) =>
-            entry.createdAt.year == now.year && entry.createdAt.month == now.month)
+        .where(
+          (LunaEntry entry) =>
+              entry.createdAt.year == now.year &&
+              entry.createdAt.month == now.month,
+        )
         .map((LunaEntry entry) => entry.createdAt.day)
         .toSet();
 
@@ -416,9 +415,15 @@ class ArchivePage extends StatelessWidget {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
         children: <Widget>[
-          Text(strings.archiveTitle, style: Theme.of(context).textTheme.headlineMedium),
+          Text(
+            strings.archiveTitle,
+            style: Theme.of(context).textTheme.headlineMedium,
+          ),
           const SizedBox(height: 6),
-          Text(strings.archiveSubtitle, style: Theme.of(context).textTheme.bodyMedium),
+          Text(
+            strings.archiveSubtitle,
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
           const SizedBox(height: 20),
           _Panel(
             title: strings.monthView,
@@ -441,10 +446,10 @@ class ArchivePage extends StatelessWidget {
                   child: Text(
                     '$day',
                     style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                          color: active
-                              ? Theme.of(context).colorScheme.onPrimary
-                              : null,
-                        ),
+                      color: active
+                          ? Theme.of(context).colorScheme.onPrimary
+                          : null,
+                    ),
                   ),
                 );
               }),
@@ -470,31 +475,27 @@ class ArchivePage extends StatelessWidget {
   }
 }
 
-class SettingsPage extends StatelessWidget {
-  const SettingsPage({
-    super.key,
-    required this.strings,
-    required this.language,
-    required this.themeMode,
-    required this.onLanguageChanged,
-    required this.onThemeChanged,
-  });
-
-  final AppStrings strings;
-  final AppLanguage language;
-  final LunarThemeMode themeMode;
-  final ValueChanged<AppLanguage> onLanguageChanged;
-  final ValueChanged<LunarThemeMode> onThemeChanged;
+class SettingsPage extends ConsumerWidget {
+  const SettingsPage({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final AppStrings strings = ref.watch(appStringsProvider);
+    final AppLanguage language = ref.watch(appLanguageProvider);
+    final LunarThemeMode themeMode = ref.watch(themeModeProvider);
     return SafeArea(
       child: ListView(
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
         children: <Widget>[
-          Text(strings.settingsTitle, style: Theme.of(context).textTheme.headlineMedium),
+          Text(
+            strings.settingsTitle,
+            style: Theme.of(context).textTheme.headlineMedium,
+          ),
           const SizedBox(height: 6),
-          Text(strings.settingsSubtitle, style: Theme.of(context).textTheme.bodyMedium),
+          Text(
+            strings.settingsSubtitle,
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
           const SizedBox(height: 20),
           _Panel(
             title: strings.language,
@@ -511,7 +512,7 @@ class SettingsPage extends StatelessWidget {
               ],
               selected: <AppLanguage>{language},
               onSelectionChanged: (Set<AppLanguage> values) {
-                onLanguageChanged(values.first);
+                updateLanguage(ref, values.first);
               },
             ),
           ),
@@ -533,7 +534,7 @@ class SettingsPage extends StatelessWidget {
               ],
               selected: <LunarThemeMode>{themeMode},
               onSelectionChanged: (Set<LunarThemeMode> values) {
-                onThemeChanged(values.first);
+                updateThemeMode(ref, values.first);
               },
             ),
           ),
@@ -542,7 +543,9 @@ class SettingsPage extends StatelessWidget {
             title: strings.about,
             child: Text(
               strings.aboutText,
-              style: Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.5),
+              style: Theme.of(
+                context,
+              ).textTheme.bodyLarge?.copyWith(height: 1.5),
             ),
           ),
         ],
@@ -552,11 +555,7 @@ class SettingsPage extends StatelessWidget {
 }
 
 class SceneCard extends StatelessWidget {
-  const SceneCard({
-    super.key,
-    required this.strings,
-    required this.entry,
-  });
+  const SceneCard({super.key, required this.strings, required this.entry});
 
   final AppStrings strings;
   final LunaEntry? entry;
@@ -631,9 +630,7 @@ class SceneCard extends StatelessWidget {
           Positioned(
             bottom: 24,
             right: 26,
-            child: _PixelRover(
-              active: hasEntry && entry!.energy != Energy.low,
-            ),
+            child: _PixelRover(active: hasEntry && entry!.energy != Energy.low),
           ),
           Positioned(
             top: 0,
@@ -644,17 +641,17 @@ class SceneCard extends StatelessWidget {
                 Text(
                   strings.sceneTitle,
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700,
-                      ),
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 Text(
                   hasEntry ? sceneSummary(strings, entry!) : strings.sceneEmpty,
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Colors.white.withValues(alpha: 0.92),
-                        height: 1.5,
-                      ),
+                    color: Colors.white.withValues(alpha: 0.92),
+                    height: 1.5,
+                  ),
                 ),
               ],
             ),
@@ -689,7 +686,12 @@ class _PixelBuilding extends StatelessWidget {
     );
   }
 
-  Widget _block(double width, double height, Color color, {bool windows = false}) {
+  Widget _block(
+    double width,
+    double height,
+    Color color, {
+    bool windows = false,
+  }) {
     return Container(
       width: width,
       height: height,
@@ -705,11 +707,7 @@ class _PixelBuilding extends StatelessWidget {
                 runSpacing: 4,
                 children: List<Widget>.generate(
                   6,
-                  (_) => Container(
-                    width: 6,
-                    height: 6,
-                    color: lightColor,
-                  ),
+                  (_) => Container(width: 6, height: 6, color: lightColor),
                 ),
               ),
             )
@@ -736,13 +734,7 @@ class _PixelRover extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 2),
-        Row(
-          children: <Widget>[
-            _wheel(),
-            const SizedBox(width: 8),
-            _wheel(),
-          ],
-        ),
+        Row(children: <Widget>[_wheel(), const SizedBox(width: 8), _wheel()]),
       ],
     );
   }
@@ -760,10 +752,7 @@ class _PixelRover extends StatelessWidget {
 }
 
 class _ArchiveCard extends StatelessWidget {
-  const _ArchiveCard({
-    required this.strings,
-    required this.entry,
-  });
+  const _ArchiveCard({required this.strings, required this.entry});
 
   final AppStrings strings;
   final LunaEntry entry;
@@ -798,21 +787,36 @@ class _ArchiveCard extends StatelessWidget {
             spacing: 8,
             runSpacing: 8,
             children: <Widget>[
-              _StatusChip(label: strings.energy, value: energyLabel(strings, entry.energy)),
-              _StatusChip(label: strings.focus, value: focusLabel(strings, entry.focus)),
-              _StatusChip(label: strings.sleep, value: sleepLabel(strings, entry.sleep)),
+              _StatusChip(
+                label: strings.energy,
+                value: energyLabel(strings, entry.energy),
+              ),
+              _StatusChip(
+                label: strings.focus,
+                value: focusLabel(strings, entry.focus),
+              ),
+              _StatusChip(
+                label: strings.sleep,
+                value: sleepLabel(strings, entry.sleep),
+              ),
             ],
           ),
           const SizedBox(height: 10),
           Text(
-            buildSignal(strings, entry),
-            style: Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.45),
+            entry.generatedSignalText.isEmpty
+                ? buildSignal(strings, entry)
+                : entry.generatedSignalText,
+            style: Theme.of(
+              context,
+            ).textTheme.bodyLarge?.copyWith(height: 1.45),
           ),
           if (entry.note.isNotEmpty) ...<Widget>[
             const SizedBox(height: 8),
             Text(
               entry.note,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.45),
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(height: 1.45),
             ),
           ],
         ],
@@ -822,11 +826,7 @@ class _ArchiveCard extends StatelessWidget {
 }
 
 class _Panel extends StatelessWidget {
-  const _Panel({
-    required this.title,
-    required this.child,
-    this.trailing,
-  });
+  const _Panel({required this.title, required this.child, this.trailing});
 
   final String title;
   final Widget child;
@@ -863,10 +863,7 @@ class _Panel extends StatelessWidget {
 }
 
 class _StatusChip extends StatelessWidget {
-  const _StatusChip({
-    required this.label,
-    required this.value,
-  });
+  const _StatusChip({required this.label, required this.value});
 
   final String label;
   final String value;
@@ -879,7 +876,7 @@ class _StatusChip extends StatelessWidget {
         color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(8),
       ),
-      child: Text('$label · $value'),
+      child: Text('$label 路 $value'),
     );
   }
 }
@@ -919,185 +916,6 @@ class _SegmentBlock<T> extends StatelessWidget {
       ),
     );
   }
-}
-
-class AppStrings {
-  const AppStrings(this.appLanguage);
-
-  final AppLanguage appLanguage;
-
-  String get appTitle => appLanguage == AppLanguage.zh ? 'Luna Log / 月面日志' : 'Luna Log';
-  String get appSubtitle => appLanguage == AppLanguage.zh
-      ? '把今天的状态写进一座安静运转的月面基地。'
-      : 'Turn today into a quiet lunar-base log.';
-  String get home => appLanguage == AppLanguage.zh ? '首页' : 'Home';
-  String get log => appLanguage == AppLanguage.zh ? '记录' : 'Log';
-  String get archive => appLanguage == AppLanguage.zh ? '归档' : 'Archive';
-  String get settings => appLanguage == AppLanguage.zh ? '设置' : 'Settings';
-  String get todaySignal => appLanguage == AppLanguage.zh ? '今日信号' : 'Today\'s Signal';
-  String get statusSummary => appLanguage == AppLanguage.zh ? '状态摘要' : 'Status Summary';
-  String get logNow => appLanguage == AppLanguage.zh ? '记录今天' : 'Log Today';
-  String get noEntryYet => appLanguage == AppLanguage.zh ? '今天还没有新的记录。' : 'No entry has been logged today.';
-  String get stationBrief => appLanguage == AppLanguage.zh ? '基地简报' : 'Station Brief';
-  String get frequency => appLanguage == AppLanguage.zh ? '频段' : 'Frequency';
-  String get noNote => appLanguage == AppLanguage.zh ? '没有补充备注。' : 'No extra note today.';
-  String get emptySignal => appLanguage == AppLanguage.zh
-      ? '基地尚未收到今日回传。先记录一次状态，月面会亮起第一盏灯。'
-      : 'The base has not received today\'s return signal yet. Log once to light the first window.';
-  String get sceneTitle => appLanguage == AppLanguage.zh ? '月面场景' : 'Lunar Scene';
-  String get sceneEmpty => appLanguage == AppLanguage.zh
-      ? '基地处于待机状态，跑道安静，通信塔维持低功耗守望。'
-      : 'The base is idle, the runway is quiet, and the relay tower stays on low power watch.';
-  String get mood => appLanguage == AppLanguage.zh ? '情绪' : 'Mood';
-  String get energy => appLanguage == AppLanguage.zh ? '能量' : 'Energy';
-  String get focus => appLanguage == AppLanguage.zh ? '专注' : 'Focus';
-  String get sleep => appLanguage == AppLanguage.zh ? '睡眠' : 'Sleep';
-  String get logTitle => appLanguage == AppLanguage.zh ? '今日记录' : 'Daily Log';
-  String get logSubtitle => appLanguage == AppLanguage.zh
-      ? '快速写下今天的状态，生成一条月面信号。'
-      : 'Capture today quickly and generate a lunar signal.';
-  String get note => appLanguage == AppLanguage.zh ? '备注' : 'Note';
-  String get noteHint => appLanguage == AppLanguage.zh
-      ? '写一点今天的感受、碎片想法或想留给自己的话。'
-      : 'Leave a short note, feeling, or small thought for today.';
-  String get preview => appLanguage == AppLanguage.zh ? '信号预览' : 'Signal Preview';
-  String get saveEntry => appLanguage == AppLanguage.zh ? '保存记录' : 'Save Entry';
-  String get saved => appLanguage == AppLanguage.zh ? '已写入月面日志。' : 'Saved to lunar log.';
-  String get archiveTitle => appLanguage == AppLanguage.zh ? '归档' : 'Archive';
-  String get archiveSubtitle => appLanguage == AppLanguage.zh
-      ? '以时间线和月视图回看这座基地的变化。'
-      : 'Review the base through a timeline and a month grid.';
-  String get monthView => appLanguage == AppLanguage.zh ? '月视图' : 'Month View';
-  String get timeline => appLanguage == AppLanguage.zh ? '时间线' : 'Timeline';
-  String get emptyArchive => appLanguage == AppLanguage.zh ? '还没有历史记录。' : 'No archive entries yet.';
-  String get settingsTitle => appLanguage == AppLanguage.zh ? '设置' : 'Settings';
-  String get settingsSubtitle => appLanguage == AppLanguage.zh
-      ? '切换语言与主题，让基地更贴近你的节奏。'
-      : 'Tune language and theme for your own orbit.';
-  String get language => appLanguage == AppLanguage.zh ? '语言' : 'Language';
-  String get chinese => appLanguage == AppLanguage.zh ? '中文' : 'Chinese';
-  String get english => appLanguage == AppLanguage.zh ? '英文' : 'English';
-  String get theme => appLanguage == AppLanguage.zh ? '主题' : 'Theme';
-  String get darkTheme => appLanguage == AppLanguage.zh ? '深色' : 'Dark';
-  String get lightTheme => appLanguage == AppLanguage.zh ? '浅色' : 'Light';
-  String get about => appLanguage == AppLanguage.zh ? '关于' : 'About';
-  String get aboutText => appLanguage == AppLanguage.zh
-      ? 'Luna Log 是一个像素风月面基地情绪日志 MVP：首页展示场景与信号，记录页写入状态，归档页查看历史，设置页切换语言与主题。'
-      : 'Luna Log is a pixel-art lunar-base mood journal MVP with a scene-driven home, a compact log flow, an archive view, and bilingual theme settings.';
-}
-
-String moodLabel(AppStrings strings, Mood value) {
-  switch (value) {
-    case Mood.calm:
-      return strings.appLanguage == AppLanguage.zh ? '平静' : 'Calm';
-    case Mood.bright:
-      return strings.appLanguage == AppLanguage.zh ? '明亮' : 'Bright';
-    case Mood.low:
-      return strings.appLanguage == AppLanguage.zh ? '低落' : 'Low';
-    case Mood.restless:
-      return strings.appLanguage == AppLanguage.zh ? '躁动' : 'Restless';
-    case Mood.tender:
-      return strings.appLanguage == AppLanguage.zh ? '柔软' : 'Tender';
-  }
-}
-
-String energyLabel(AppStrings strings, Energy value) {
-  switch (value) {
-    case Energy.low:
-      return strings.appLanguage == AppLanguage.zh ? '偏低' : 'Low';
-    case Energy.steady:
-      return strings.appLanguage == AppLanguage.zh ? '稳定' : 'Steady';
-    case Energy.high:
-      return strings.appLanguage == AppLanguage.zh ? '高' : 'High';
-  }
-}
-
-String focusLabel(AppStrings strings, Focus value) {
-  switch (value) {
-    case Focus.scattered:
-      return strings.appLanguage == AppLanguage.zh ? '分散' : 'Scattered';
-    case Focus.gentle:
-      return strings.appLanguage == AppLanguage.zh ? '柔和' : 'Gentle';
-    case Focus.sharp:
-      return strings.appLanguage == AppLanguage.zh ? '清晰' : 'Sharp';
-  }
-}
-
-String sleepLabel(AppStrings strings, Sleep value) {
-  switch (value) {
-    case Sleep.poor:
-      return strings.appLanguage == AppLanguage.zh ? '不足' : 'Poor';
-    case Sleep.okay:
-      return strings.appLanguage == AppLanguage.zh ? '一般' : 'Okay';
-    case Sleep.good:
-      return strings.appLanguage == AppLanguage.zh ? '良好' : 'Good';
-  }
-}
-
-String frequencyLabel(AppStrings strings, FrequencyTag value) {
-  switch (value) {
-    case FrequencyTag.lofi:
-      return strings.appLanguage == AppLanguage.zh ? 'Lo-fi' : 'Lo-fi';
-    case FrequencyTag.lunarRadio:
-      return strings.appLanguage == AppLanguage.zh ? '月面电台' : 'Lunar Radio';
-    case FrequencyTag.deepSpace:
-      return strings.appLanguage == AppLanguage.zh ? '深空' : 'Deep Space';
-  }
-}
-
-String sceneSummary(AppStrings strings, LunaEntry entry) {
-  final String sky = switch (entry.mood) {
-    Mood.calm => strings.appLanguage == AppLanguage.zh ? '夜空平稳' : 'steady sky',
-    Mood.bright => strings.appLanguage == AppLanguage.zh ? '天幕偏亮' : 'bright horizon',
-    Mood.low => strings.appLanguage == AppLanguage.zh ? '云层偏低' : 'dim horizon',
-    Mood.restless => strings.appLanguage == AppLanguage.zh ? '电流浮动' : 'drifting current',
-    Mood.tender => strings.appLanguage == AppLanguage.zh ? '月雾柔和' : 'soft moon mist',
-  };
-  final String station = switch (entry.energy) {
-    Energy.low => strings.appLanguage == AppLanguage.zh ? '基地低功耗运转' : 'low-power base',
-    Energy.steady => strings.appLanguage == AppLanguage.zh ? '系统稳定值守' : 'steady systems',
-    Energy.high => strings.appLanguage == AppLanguage.zh ? '舱段灯光更活跃' : 'lively modules',
-  };
-  return strings.appLanguage == AppLanguage.zh
-      ? '$sky，$station。'
-      : '$sky, with $station.';
-}
-
-String buildSignal(AppStrings strings, LunaEntry entry) {
-  final String moodTone = switch (entry.mood) {
-    Mood.calm => strings.appLanguage == AppLanguage.zh ? '主站通信平稳' : 'Main relay is calm',
-    Mood.bright => strings.appLanguage == AppLanguage.zh ? '采样舱亮度上升' : 'The sample bay is brighter',
-    Mood.low => strings.appLanguage == AppLanguage.zh ? '基地把灯调暗了一格' : 'The base dims its lights slightly',
-    Mood.restless => strings.appLanguage == AppLanguage.zh ? '信号边缘带着一点漂移' : 'The signal edge drifts a little',
-    Mood.tender => strings.appLanguage == AppLanguage.zh ? '今晚的月雾很轻' : 'Tonight\'s moon mist feels soft',
-  };
-  final String energyTone = switch (entry.energy) {
-    Energy.low => strings.appLanguage == AppLanguage.zh ? '值班系统维持最低但稳定的输出' : 'keeping only the minimum steady output',
-    Energy.steady => strings.appLanguage == AppLanguage.zh ? '主系统保持着均匀供能' : 'with balanced station power',
-    Energy.high => strings.appLanguage == AppLanguage.zh ? '几个舱段都亮起了回应灯' : 'and more modules answer with light',
-  };
-  final String focusTone = switch (entry.focus) {
-    Focus.scattered => strings.appLanguage == AppLanguage.zh ? '频道有些分叉，但仍能听清自己' : 'The channel branches a little, but your voice still comes through',
-    Focus.gentle => strings.appLanguage == AppLanguage.zh ? '回波很柔和，像慢慢对齐轨道' : 'The echo stays gentle, like easing into orbit',
-    Focus.sharp => strings.appLanguage == AppLanguage.zh ? '航迹线清楚，回传坐标很干净' : 'The course line is sharp and the coordinates come back clean',
-  };
-  final String sleepTone = switch (entry.sleep) {
-    Sleep.poor => strings.appLanguage == AppLanguage.zh ? '基地提醒你今晚尽量提前回舱休整。' : 'The base suggests an earlier return to rest tonight.',
-    Sleep.okay => strings.appLanguage == AppLanguage.zh ? '补给足够，今晚可以慢一点收尾。' : 'Supplies look fine; you can close the day gently.',
-    Sleep.good => strings.appLanguage == AppLanguage.zh ? '你的休整记录让整座站更安定。' : 'Your recovery record steadies the whole station.',
-  };
-  return strings.appLanguage == AppLanguage.zh
-      ? '$moodTone，$energyTone。$focusTone。$sleepTone'
-      : '$moodTone, $energyTone. $focusTone. $sleepTone';
-}
-
-String formatDate(DateTime value, AppLanguage language) {
-  final String month = value.month.toString().padLeft(2, '0');
-  final String day = value.day.toString().padLeft(2, '0');
-  if (language == AppLanguage.zh) {
-    return '${value.year}年$month月$day日';
-  }
-  return '${value.year}-$month-$day';
 }
 
 ThemeData _buildDarkTheme() {
