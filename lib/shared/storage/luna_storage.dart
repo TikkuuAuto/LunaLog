@@ -31,14 +31,11 @@ class LunaStorage {
         .whereType<Map<dynamic, dynamic>>()
         .map(LunaEntry.fromMap)
         .toList();
-    entries.sort(
-      (LunaEntry a, LunaEntry b) => b.createdAt.compareTo(a.createdAt),
-    );
-    return entries;
+    return sortDailyEntries(entries);
   }
 
   Future<void> saveEntry(LunaEntry entry) {
-    return _logsBox.put(entry.id, entry.toMap());
+    return _logsBox.put(entry.dateKey, entry.toMap());
   }
 
   AppSettings loadSettings() {

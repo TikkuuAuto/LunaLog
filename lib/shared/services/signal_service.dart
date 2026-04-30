@@ -93,7 +93,7 @@ String buildSignal(AppStrings strings, LunaEntry entry) {
           ? '值班系统维持最低但稳定的输出'
           : 'keeping only the minimum steady output',
     Energy.steady =>
-      strings.isZh ? '主系统保持着均匀供能' : 'with balanced station power',
+      strings.isZh ? '主系统保持着均衡供能' : 'with balanced station power',
     Energy.high =>
       strings.isZh ? '几个舱段都亮起了回应灯' : 'and more modules answer with light',
   };
@@ -108,7 +108,7 @@ String buildSignal(AppStrings strings, LunaEntry entry) {
           : 'The echo stays gentle, like easing into orbit',
     Focus.sharp =>
       strings.isZh
-          ? '航迹线清楚，回传坐标很干净'
+          ? '航迹线清晰，回传坐标很干净'
           : 'The course line is sharp and the coordinates come back clean',
   };
   final String sleepTone = switch (entry.sleep) {

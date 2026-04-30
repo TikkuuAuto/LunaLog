@@ -65,19 +65,44 @@ class AppSettings {
     return AppSettings(
       language: enumByName(
         AppLanguage.values,
-        map['language'] as String?,
+        _stringFromMap(map, 'language'),
         AppLanguage.zh,
       ),
       themeMode: enumByName(
         LunarThemeMode.values,
-        map['themeMode'] as String?,
+        _stringFromMap(map, 'themeMode'),
         LunarThemeMode.dark,
       ),
-      firstLaunchCompleted: map['firstLaunchCompleted'] as bool? ?? true,
-      baseProgressLevel: map['baseProgressLevel'] as int? ?? 1,
-      unlockedCompanions:
-          (map['unlockedCompanions'] as List?)?.cast<String>() ?? <String>[],
-      streakCountCached: map['streakCountCached'] as int? ?? 0,
+      firstLaunchCompleted: _boolFromMap(map, 'firstLaunchCompleted') ?? true,
+      baseProgressLevel: _intFromMap(map, 'baseProgressLevel') ?? 1,
+      unlockedCompanions: _stringListFromMap(map, 'unlockedCompanions'),
+      streakCountCached: _intFromMap(map, 'streakCountCached') ?? 0,
     );
+  }
+
+  static String? _stringFromMap(Map<dynamic, dynamic> map, String key) {
+    final Object? value = map[key];
+    return value is String ? value : null;
+  }
+
+  static bool? _boolFromMap(Map<dynamic, dynamic> map, String key) {
+    final Object? value = map[key];
+    return value is bool ? value : null;
+  }
+
+  static int? _intFromMap(Map<dynamic, dynamic> map, String key) {
+    final Object? value = map[key];
+    return value is int ? value : null;
+  }
+
+  static List<String> _stringListFromMap(
+    Map<dynamic, dynamic> map,
+    String key,
+  ) {
+    final Object? value = map[key];
+    if (value is! List) {
+      return <String>[];
+    }
+    return value.whereType<String>().toList(growable: false);
   }
 }

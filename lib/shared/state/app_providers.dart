@@ -5,8 +5,10 @@ import '../models/app_settings.dart';
 import '../models/daily_log.dart';
 import '../models/log_enums.dart';
 import '../models/signal_state.dart';
+import '../services/log_insights.dart';
 import '../services/signal_service.dart';
 import '../storage/luna_storage.dart';
+import '../utils/date_utils.dart';
 
 final Provider<LunaStorage?> logsRepositoryProvider = Provider<LunaStorage?>(
   (Ref ref) => null,
@@ -42,11 +44,14 @@ class AppSettingsNotifier extends Notifier<AppSettings> {
 class LogsNotifier extends Notifier<List<LunaEntry>> {
   @override
   List<LunaEntry> build() {
-    return <LunaEntry>[...ref.watch(initialLogsProvider)];
+    return sortDailyEntries(ref.watch(initialLogsProvider));
   }
 
   void add(LunaEntry entry) {
-    state = <LunaEntry>[entry, ...state];
+    state = sortDailyEntries(<LunaEntry>[
+      entry,
+      ...state.where((LunaEntry saved) => saved.dateKey != entry.dateKey),
+    ]);
     ref.read(logsRepositoryProvider)?.saveEntry(entry);
   }
 }
@@ -67,9 +72,31 @@ final Provider<List<LunaEntry>> archiveLogsProvider = Provider<List<LunaEntry>>(
   (Ref ref) => ref.watch(logsStateProvider),
 );
 
+final Provider<LogInsights> logInsightsProvider = Provider<LogInsights>((
+  Ref ref,
+) {
+  return buildLogInsights(ref.watch(archiveLogsProvider), DateTime.now());
+});
+
 final Provider<LunaEntry?> latestLogProvider = Provider<LunaEntry?>((Ref ref) {
   final List<LunaEntry> entries = ref.watch(archiveLogsProvider);
+  final String todayKey = dateKeyFor(DateTime.now());
+  for (final LunaEntry entry in entries) {
+    if (entry.dateKey == todayKey) {
+      return entry;
+    }
+  }
   return entries.isEmpty ? null : entries.first;
+});
+
+final Provider<LunaEntry?> todayLogProvider = Provider<LunaEntry?>((Ref ref) {
+  final String todayKey = dateKeyFor(DateTime.now());
+  for (final LunaEntry entry in ref.watch(archiveLogsProvider)) {
+    if (entry.dateKey == todayKey) {
+      return entry;
+    }
+  }
+  return null;
 });
 
 final Provider<SignalState> signalStateProvider = Provider<SignalState>((

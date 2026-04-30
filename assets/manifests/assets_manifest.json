@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "batches": [
+    {
+      "id": "batch_1",
+      "name": "Brand + bottom navigation icons",
+      "style_anchor": "assets/design-reference/companion_style_anchor.png.png",
+      "generated_at": "2026-04-29",
+      "files": {
+        "brand": [
+          "assets/brand/moon_logo_main.png",
+          "assets/brand/moon_logo_small.png",
+          "assets/brand/sparkle_star.png",
+          "assets/brand/signal_beacon_icon.png"
+        ],
+        "nav": [
+          "assets/nav/nav_home_default.png",
+          "assets/nav/nav_home_active.png",
+          "assets/nav/nav_log_default.png",
+          "assets/nav/nav_log_active.png",
+          "assets/nav/nav_add_default.png",
+          "assets/nav/nav_add_active.png",
+          "assets/nav/nav_stats_default.png",
+          "assets/nav/nav_stats_active.png",
+          "assets/nav/nav_me_default.png",
+          "assets/nav/nav_me_active.png"
+        ]
+      },
+      "notes": [
+        "Generated from a single Batch 1 icon board to keep pixel density and shading logic consistent.",
+        "Transparent PNG outputs were extracted from a chroma-key source and lightly despilled for cleaner edges."
+      ]
+    }
+  ]
+}

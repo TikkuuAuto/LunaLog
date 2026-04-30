@@ -44,3 +44,8 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Local tool caches created while building on this workstation
+/.gradle-user-home*/
+/gradle_user_home_*/
+/tmp/
